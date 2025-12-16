@@ -1,15 +1,28 @@
-// Node.js serverless function for Vercel
 export default async function handler(request, response) {
   try {
-    // Fetch DexScreener Solana pairs
-    const dexUrl = 'https://api.dexscreener.com/latest/dex/search?q=solana';
-    const res = await fetch(dexUrl);
-    const data = await res.json();
+    const endpoints = [
+      'https://api.dexscreener.com/latest/dex/search?q=solana',
+      'https://api.dexscreener.com/latest/dex/search?q=solana&page=2',
+      'https://api.dexscreener.com/latest/dex/search?q=solana&page=3'
+    ];
 
-    // Filter Solana only
-    const solPairs = (data.pairs || []).filter(p => p.chainId === 'solana');
+    let solPairs = [];
 
-    // Add CORS headers for Android / browser
+    for(const url of endpoints){
+      const res = await fetch(url);
+      const data = await res.json();
+      const filtered = (data.pairs || []).filter(p => p.chainId === 'solana');
+      solPairs = solPairs.concat(filtered);
+    }
+
+    // Remove duplicates by contract address
+    const seen = new Set();
+    solPairs = solPairs.filter(p => {
+      if(seen.has(p.baseToken?.address)) return false;
+      seen.add(p.baseToken?.address);
+      return true;
+    });
+
     response.setHeader('Access-Control-Allow-Origin','*');
     response.setHeader('Access-Control-Allow-Methods','GET');
 
