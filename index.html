@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Solana Elite Scanner v9.0</title>
+<style>
+body{font-family:system-ui;background:#0b0f1a;color:#e5e7eb;padding:16px;}
+h1{font-size:1.3rem;margin-bottom:8px;}
+button{width:100%;padding:14px;font-size:1rem;border-radius:12px;border:none;background:linear-gradient(135deg,#6366f1,#22d3ee);color:#000;cursor:pointer;margin:12px 0;}
+.card{background:#111827;border-radius:14px;padding:14px;margin-top:12px;}
+pre{white-space:pre-wrap;word-break:break-word;font-size:0.75rem;}
+.empty{text-align:center;opacity:0.6;margin-top:24px;}
+#status{margin-bottom:12px;}
+label{display:block;margin-top:12px;}
+input[type=range]{width:100%;}
+</style>
+</head>
+<body>
+
+<h1>🧠 Solana Elite Scanner v9.0</h1>
+
+<label>Elite Score Threshold: <span id="thresholdLabel">70</span></label>
+<input type="range" id="threshold" min="50" max="100" value="70">
+
+<label><input type="checkbox" id="prefilter"> Pre-Filter Mode (Show all new tokens)</label>
+
+<button id="analyzeBtn">ANALYZE</button>
+<div id="status"></div>
+
+<h3>Rejected Tokens:</h3>
+<div id="rejected"></div>
+
+<h3>Elite Candidates / Pre-Filter:</h3>
+<div id="results"></div>
+
+<script>
+const btn=document.getElementById('analyzeBtn');
+const statusEl=document.getElementById('status');
+const resultsEl=document.getElementById('results');
+const rejectedEl=document.getElementById('rejected');
+const thresholdSlider=document.getElementById('threshold');
+const thresholdLabel=document.getElementById('thresholdLabel');
+
+thresholdSlider.oninput = ()=>{thresholdLabel.textContent = thresholdSlider.value;};
+
+const proxyUrl = 'https://solana-dex-proxy1.vercel.app/api/solana'; // Update to your deployed URL
+
+// ------------------ Scoring functions ------------------
+function log(msg){statusEl.textContent=msg;}
+
+function classifyPumpFun(pair){
+  const buys = pair.dex?.volume || 0;
+  const sells = pair.dex?.volume || 0;
+  if(buys>500 && sells>300) return {label:'Retail-smooth', bonus:10};
+  if(buys>1000 && sells<50) return {label:'Sniper-dominated', penalty:-10};
+  return {label:'Mixed', bonus:0};
+}
+
+function detectWalletClustering(pair){
+  // Placeholder
+  return {label:'Unknown', bonus:0, penalty:0};
+}
+
+function scorePair(pair){
+  let score=0;
+  const liquidity = pair.dex?.liquidity || 0;
+  if(liquidity>=5000) score+=20; else score+=10;
+  if(pair.dex?.volume>100) score+=10;
+  const pf=classifyPumpFun(pair);
+  if(pf.bonus) score+=pf.bonus; if(pf.penalty) score+=pf.penalty;
+  const wc=detectWalletClustering(pair);
+  if(wc.bonus) score+=wc.bonus; if(wc.penalty) score+=wc.penalty;
+  return score;
+}
+
+// ------------------ Main Analyzer ------------------
+btn.onclick=async()=>{
+  btn.disabled=true;
+  resultsEl.innerHTML='';
+  rejectedEl.innerHTML='';
+  log('Fetching tokens from live Solana sources…');
+
+  try{
+    const r=await fetch(proxyUrl);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const data=await r.json();
+    const tokens=data.tokens || [];
+    log(`Fetched ${tokens.length} tokens.`);
+
+    if(!tokens.length){resultsEl.innerHTML='<div class="empty">No tokens returned.</div>'; btn.disabled=false; return;}
+
+    const threshold=parseInt(thresholdSlider.value);
+    const preFilter = document.getElementById('prefilter').checked;
+    const candidates=[];
+    const rejected=[];
+
+    tokens.forEach(t=>{
+      const score = scorePair(t);
+      const rejection = [];
+
+      if(!preFilter){
+        if((t.dex?.liquidity||0)<5000) rejection.push('Liquidity < $5k');
+        if(score < threshold) rejection.push(`Score below threshold (${threshold})`);
+      }
+
+      if(preFilter || rejection.length===0){
+        const pf=classifyPumpFun(t);
+        const wc=detectWalletClustering(t);
+        candidates.push({
+          name:t.name,
+          ticker:t.ticker,
+          contract_address:t.address,
+          score,
+          liquidity_status:`$${(t.dex?.liquidity||0).toFixed(0)}`,
+          buy_sell_ratio:`${t.dex?.volume||0}/${t.dex?.volume||0}`,
+          wallet_diversity_index: wc.label,
+          pumpfun_curve_index: pf.label,
+          key_insights:`Passed filters. Pump.fun: ${pf.label}. Wallet flow: ${wc.label}`
+        });
+      } else {
+        rejected.push({
+          name:t.name,
+          ticker:t.ticker,
+          address:t.address,
+          reasons: rejection
+        });
+      }
+    });
+
+    rejectedEl.innerHTML='';
+    rejected.forEach(r=>{
+      const card=document.createElement('div');
+      card.className='card';
+      card.innerHTML=`<pre>${JSON.stringify(r,null,2)}</pre>`;
+      rejectedEl.appendChild(card);
+    });
+
+    resultsEl.innerHTML='';
+    if(!candidates.length) resultsEl.innerHTML='<div class="empty">No elite-grade tokens found.</div>';
+    else candidates.forEach(c=>{
+      const card=document.createElement('div');
+      card.className='card';
+      card.innerHTML=`<pre>${JSON.stringify(c,null,2)}</pre>`;
+      resultsEl.appendChild(card);
+    });
+
+    log(`Scan complete. Survivors: ${candidates.length} | Rejected: ${rejected.length}`);
+    console.log('CANDIDATES',candidates);
+    console.log('REJECTED',rejected);
+
+  }catch(err){log('ERROR: '+err.message);}
+  btn.disabled=false;
+};
+</script>
+</body>
+</html>
