@@ -1,49 +1,35 @@
-export default async function handler(req, res) {
-  try {
-    // --- Multi-source URLs ---
-    const sources = [
-      'https://api.dexscreener.com/latest/dex/search?q=solana',
-      'https://api.dexscreener.com/latest/dex/search?q=solana&page=2',
-      'https://www.gmgn.xyz/api/solana/new.json', // hypothetical public JSON feed
-      'https://api.raydium.io/pools' // example Raydium pools JSON
-    ];
+export default async function handler(req,res){
+  try{
+    const solscanUrl='https://public-api.solscan.io/v1/token/list?sortBy=createdAt';
+    const dexscreenerUrl='https://api.dexscreener.com/latest/dex/search?q=solana';
 
-    let tokens = [];
+    // Fetch Solscan new tokens
+    const sRes=await fetch(solscanUrl);
+    const solscanData=await sRes.json();
+    const newTokens=solscanData.data?.slice(0,50) || []; // latest 50 tokens
 
-    for (const url of sources) {
-      try {
-        const r = await fetch(url);
-        const data = await r.json();
+    // Fetch DexScreener Solana pairs
+    const dRes=await fetch(dexscreenerUrl);
+    const dsData=await dRes.json();
+    const dsPairs=dsData.pairs?.filter(p=>p.chainId==='solana')||[];
 
-        // Extract pairs safely, depending on source structure
-        let extracted = [];
-        if (data.pairs) extracted = data.pairs.filter(p => p.chainId === 'solana');
-        else if (data.tokens) extracted = data.tokens;
-        else if (Array.isArray(data)) extracted = data;
-
-        tokens = tokens.concat(extracted);
-      } catch(e) {
-        console.log('Source fetch failed:', url, e.message);
-        continue; // skip failed source
-      }
-    }
-
-    // Deduplicate by contract address
-    const seen = new Set();
-    tokens = tokens.filter(t => {
-      const addr = t.baseToken?.address || t.address || t.id;
-      if (!addr || seen.has(addr)) return false;
+    // Merge by contract address
+    const merged=[];
+    const seen=new Set();
+    newTokens.forEach(t=>{
+      const addr=t.address;
+      if(!addr || seen.has(addr)) return;
       seen.add(addr);
-      return true;
+      // Attach DEX info if exists
+      const dex=dsPairs.find(p=>p.baseToken.address===addr);
+      merged.push({...t,dex});
     });
 
-    // CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET');
+    res.setHeader('Access-Control-Allow-Origin','*');
+    res.setHeader('Access-Control-Allow-Methods','GET');
+    return res.status(200).json({tokens:merged,timestamp:new Date().toISOString()});
 
-    return res.status(200).json({ tokens, timestamp: new Date().toISOString() });
-
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
+  }catch(err){
+    return res.status(500).json({error:err.message});
   }
 }
