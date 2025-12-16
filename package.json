@@ -1,0 +1,6 @@
+{
+  "name": "solana-dex-proxy",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {}
+}
